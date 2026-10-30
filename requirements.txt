@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+httpx
+pytest
+argon2-cffi
+ascon==0.0.9
