@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from argon2 import PasswordHasher
 import crypto
 
-DB = lambda: os.environ.get("DB_PATH", "smartgrid.db")
+DB = lambda: os.environ.get("DB_PATH", "/tmp/smartgrid.db" if os.environ.get("VERCEL") else "smartgrid.db")
 TTL = lambda: int(os.environ.get("CHALLENGE_TTL_SECONDS", "30"))
 VER = "CPv1"
 ph = PasswordHasher()
