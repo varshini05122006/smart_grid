@@ -9,7 +9,18 @@ DB = lambda: os.environ.get("DB_PATH", "smartgrid.db")
 TTL = lambda: int(os.environ.get("CHALLENGE_TTL_SECONDS", "30"))
 VER = "CPv1"
 ph = PasswordHasher()
-TOKENS = {}  # token -> (username, role); in-memory, prototype only
+import hmac, hashlib, base64
+SECRET = os.environ.get("SECRET_KEY", "change-me").encode()
+def make_token(u, role):
+    p = base64.urlsafe_b64encode(f"{u}|{role}|{int(time.time()) + 86400}".encode()).decode()
+    return p + "." + hmac.new(SECRET, p.encode(), hashlib.sha256).hexdigest()
+def read_token(t):
+    try:
+        p, sig = t.rsplit(".", 1)
+        if not hmac.compare_digest(sig, hmac.new(SECRET, p.encode(), hashlib.sha256).hexdigest()): return None
+        u, role, exp = base64.urlsafe_b64decode(p).decode().split("|")
+        return (u, role) if time.time() < int(exp) else None
+    except Exception: return None
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, username TEXT UNIQUE NOT NULL, pw_hash TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN('admin','operator')));
@@ -43,9 +54,9 @@ def _s():
                 c.execute("INSERT INTO users(username,pw_hash,role) VALUES(?,?,?)", (u, ph.hash(p), "admin"))
 
 def user(authorization: str = Header(default="")):
-    t = authorization.removeprefix("Bearer ").strip()
-    if t not in TOKENS: raise HTTPException(401, "Not authenticated")
-    return TOKENS[t]
+    r = read_token(authorization.removeprefix("Bearer ").strip())
+    if not r: raise HTTPException(401, "Not authenticated")
+    return r
 def admin(u=Depends(user)):
     if u[1] != "admin": raise HTTPException(403, "Administrator role required")
     return u
@@ -60,10 +71,10 @@ def login(b: Login):
         except Exception: ok = False
         log(c, None, "login", f"Login for {b.username}", "success" if ok else "failure", "info" if ok else "warning")
     if not ok: raise HTTPException(401, "Invalid username or password")
-    t = secrets.token_urlsafe(32); TOKENS[t] = (r["username"], r["role"])
+    t = make_token(r["username"], r["role"])
     return {"token": t, "role": r["role"]}
 @app.post("/api/auth/logout")
-def logout(authorization: str = Header(default="")): TOKENS.pop(authorization.removeprefix("Bearer ").strip(), None); return {"ok": True}
+def logout(): return {"ok": True}
 @app.get("/api/health")
 def health(): return {"status": "ok", "crypto": crypto.ALG, "note": "Not NIST SP 800-232 Ascon-AEAD128"}
 
